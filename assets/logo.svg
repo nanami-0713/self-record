@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- SelfRecord logo：五域柱（时间/睡眠/训练/饮食/预算），Ely 暖纸底 + 墨色，
+       中柱赭石点睛（颜色承载含义，palette.rs ochre #AA732B） -->
+  <rect width="1024" height="1024" fill="#FCFAF7"/>
+  <g>
+    <rect x="160" y="460" width="96" height="300" rx="48" fill="#181613"/>
+    <rect x="312" y="280" width="96" height="480" rx="48" fill="#181613"/>
+    <rect x="464" y="100" width="96" height="660" rx="48" fill="#AA732B"/>
+    <rect x="616" y="330" width="96" height="430" rx="48" fill="#181613"/>
+    <rect x="768" y="420" width="96" height="340" rx="48" fill="#181613"/>
+  </g>
+</svg>

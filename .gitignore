@@ -1,0 +1,21 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+DerivedData/
+
+# 外部参考材料（docs/design.md 引用的 lifttime/ 与 ely/，不入库——design.md §8 目录树）
+/reference/
+
+# XcodeGen 产出（app/project.yml 生成；project.yml 本身入库）
+app/*.xcodeproj/
+xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store
+
+# Release artifacts (placed in GitHub Release, not committed to repo)
+dist/
+
+# Local tool directory
+.v2c/

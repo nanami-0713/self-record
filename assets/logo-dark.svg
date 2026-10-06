@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- SelfRecord logo 暗色版：Ely 暗底（palette.rs dark bg #131110 / fg #F3F1F0 / ochre #CD995C） -->
+  <rect width="1024" height="1024" fill="#131110"/>
+  <g>
+    <rect x="160" y="460" width="96" height="300" rx="48" fill="#F3F1F0"/>
+    <rect x="312" y="280" width="96" height="480" rx="48" fill="#F3F1F0"/>
+    <rect x="464" y="100" width="96" height="660" rx="48" fill="#CD995C"/>
+    <rect x="616" y="330" width="96" height="430" rx="48" fill="#F3F1F0"/>
+    <rect x="768" y="420" width="96" height="340" rx="48" fill="#F3F1F0"/>
+  </g>
+</svg>
