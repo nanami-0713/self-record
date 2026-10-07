@@ -9,7 +9,7 @@
 
 「生活量化五件套」iOS 应用：**时间分配 + 睡眠 + 训练 + 饮食 + 预算** 五个域各自独立记录，靠跨域联动互相喂养——练后餐预选、恢复建议读实际蛋白摄入、记餐花费自动入账、训练耗时聚合、五域合一的日简报。
 
-> 五根柱 = 五个域，中柱赭石点睛——「颜色承载含义，而非装饰」（设计语言来自 [Ely](https://github.com/ZacharyZhang-NY/Ely-GPUI-Components)）。整体思路参考此前安卓端的 [练时 LiftTime](https://github.com/nanami-0713/lifttime)，按 iOS 原生习惯重新设计，不照搬。
+> 五根柱 = 五个域，中柱赭石点睛——「颜色承载含义，而非装饰」（设计语言来自 [Ely](https://github.com/ZacharyZhang-NY/Ely-GPUI-Components)）。整体思路参考安卓端的 [练时 LiftTime](https://github.com/nanami-0713/lifttime)，按 iOS 原生习惯重新设计。
 
 ## 下载与安装（iOS 17+）
 
