@@ -132,7 +132,9 @@ public struct ActiveWorkoutView: View {
     }
 
     private var searchSection: some View {
-        VStack(alignment: .leading, spacing: SRSpacing.sm) {
+        // 打分搜索单次求值（isEmpty/prefix/count 三处原先各跑一遍全库搜索）
+        let results = self.results
+        return VStack(alignment: .leading, spacing: SRSpacing.sm) {
             SRField(text: $state.query,
                     placeholder: "搜索动作：深蹲、划船、bench press…",
                     icon: "magnifyingglass")

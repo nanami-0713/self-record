@@ -50,6 +50,11 @@ struct SelfRecordApp: App {
     /// 主状态容器（冻结物 C）：`<ApplicationSupport>/SelfRecord/`（§5）。
     @StateObject private var model: AppModel
 
+    /// 退后台立即落盘防抖窗口内的变更（DataStore.flushNow 的设计钩子，§5：
+    /// 「commit 立即写 + 150ms 防抖合并」——挂起后 Task.sleep 不再触发，
+    /// 不显式 flush 的话最后一笔会在进程回收时丢失）。
+    @Environment(\.scenePhase) private var scenePhase
+
     init() {
         // iOS 26 Liquid Glass 底部 Tab 栏不吃 TabView 的 .tint()（实测仍渲染
         // 系统蓝），经 appearance 代理注入 Ely 墨色主色（亮 #181613 / 暗 #F3F1F0）。
@@ -73,6 +78,12 @@ struct SelfRecordApp: App {
                 // @EnvironmentObject 形态；其余页面按参数注入，双通道并存）。
                 .environmentObject(model)
                 .preferredColorScheme(colorScheme)
+                // inactive（拉通知中心/切走）即 flush：等 .background 可能来不及
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .inactive || phase == .background {
+                        Task { await model.store.flushNow() }
+                    }
+                }
         }
     }
 
@@ -123,7 +134,12 @@ struct SelfRecordApp: App {
                 .tabItem { Label("记录", systemImage: "list.bullet") }
                 .tag(Tab.records)
 
-            WorkoutListView()
+            // NavigationStack：WorkoutListView 的行点击走 NavigationLink push 详情页，
+            // 宿主约定（该文件头注释）要求外部提供导航容器——TabView 不自带
+            // （2026-10-12 修复：此前裸挂导致详情页进不去、navigationTitle 不显示）。
+            NavigationStack {
+                WorkoutListView()
+            }
                 .tabItem { Label("训练", systemImage: "dumbbell") }
                 .tag(Tab.workout)
 

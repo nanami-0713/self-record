@@ -58,7 +58,14 @@ final class DataManagementFlow: ObservableObject {
     // MARK: 概览
 
     func refresh(_ model: AppModel) {
-        overview = model.dataOverview()
+        // 主线程只取值拷贝，8 域 pretty-print 编码在后台跑（同 sanitizeForPreview 模式）
+        let input = model.dataOverviewInput()
+        Task {
+            let overview = await Task.detached(priority: .userInitiated) {
+                AppModel.computeOverview(input)
+            }.value
+            self.overview = overview
+        }
     }
 
     // MARK: 导出

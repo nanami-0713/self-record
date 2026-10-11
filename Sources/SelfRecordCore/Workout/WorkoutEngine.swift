@@ -48,10 +48,15 @@ public enum WorkoutEngine {
         let prevWin = workouts.filter { $0.startedAt >= prevStart && $0.startedAt < start }
 
         // 频率与容量环比（analysis.js:291-294）
+        // 单趟预算：窗口内每条训练的 sessionStats 只算一次，容量合计 / 部位分布 /
+        // 逐日容量全部从这份结果派生（原先三处各算一遍；对比窗只需 tonnage，单独一趟）
         let weeks = Double(days) / 7
         let freqRaw = weeks > 0 ? Double(inWin.count) / weeks : 0
         let freqPerWeek = (freqRaw * 10).rounded() / 10
-        let tonnageThis = inWin.reduce(0.0) { $0 + sessionStats($1, customExercises: customExercises).tonnage }
+        let statsInWin = inWin.map {
+            (workout: $0, stats: sessionStats($0, customExercises: customExercises))
+        }
+        let tonnageThis = statsInWin.reduce(0.0) { $0 + $1.stats.tonnage }
         let tonnagePrev = prevWin.reduce(0.0) { $0 + sessionStats($1, customExercises: customExercises).tonnage }
         let trendPct: Int? = tonnagePrev > 0
             ? Int(((tonnageThis / tonnagePrev - 1) * 100).rounded()) : nil
@@ -59,8 +64,8 @@ public enum WorkoutEngine {
         // 部位分布（按结构组聚合；analysis.js:297-304）
         var groupVolume: [StructuralGroup: Double] = [:]
         var groupSetCount: [StructuralGroup: Int] = [:]
-        for w in inWin {
-            for g in sessionStats(w, customExercises: customExercises).groups {
+        for s in statsInWin {
+            for g in s.stats.groups {
                 groupVolume[g.key, default: 0] += g.volume
                 groupSetCount[g.key, default: 0] += g.setCount
             }
@@ -191,16 +196,24 @@ public enum WorkoutEngine {
             advice.append("容量单阶段涨幅超过四成，属于比较激进的加量，留意关节和小肌群的疲劳信号。")
         }
 
-        // 逐日容量（趋势图数据；analysis.js:386-396 dailySeries）
+        // 逐日容量（趋势图数据；analysis.js:386-396 dailySeries）：
+        // 窗口内训练按 DayKey 一次分桶（等价于逐日 [dayStart, dayEnd) 过滤——
+        // dayKey 归日与该区间一一对应），替代原先逐日对全量 workouts 的 filter
+        var volumeByDay: [DayKey: (volumeKg: Double, sessions: Int)] = [:]
+        for s in statsInWin {
+            let day = calendar.dayKey(for: s.workout.startedAt)
+            var bucket = volumeByDay[day, default: (volumeKg: 0, sessions: 0)]
+            bucket.volumeKg += s.stats.tonnage
+            bucket.sessions += 1
+            volumeByDay[day] = bucket
+        }
         var dailyVolume: [DailyVolumePoint] = []
         for offset in stride(from: days - 1, through: 0, by: -1) {
-            guard let day = calendar.addingDays(-offset, to: span.endDay),
-                  let dayStart = calendar.date(of: day),
-                  let dayEnd = calendar.calendar.date(byAdding: .day, value: 1, to: dayStart)
-            else { continue }
-            let ws = workouts.filter { $0.startedAt >= dayStart && $0.startedAt < dayEnd }
-            let vol = ws.reduce(0.0) { $0 + sessionStats($1, customExercises: customExercises).tonnage }
-            dailyVolume.append(DailyVolumePoint(day: day, volumeKg: vol, sessions: ws.count))
+            guard let day = calendar.addingDays(-offset, to: span.endDay) else { continue }
+            let bucket = volumeByDay[day] ?? (volumeKg: 0, sessions: 0)
+            dailyVolume.append(DailyVolumePoint(day: day,
+                                                volumeKg: bucket.volumeKg,
+                                                sessions: bucket.sessions))
         }
 
         return WorkoutPeriodAnalysis(days: days,

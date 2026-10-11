@@ -144,8 +144,34 @@ extension AppModel {
         public var totalBytes: Int
     }
 
-    /// 汇总当前内存快照的数据概览（清空 / 导入后刷新）。
-    func dataOverview() -> DataOverview {
+    /// 概览输入快照：主线程取各域数组拷贝（值类型，Sendable），体积编码在
+    /// 后台执行——8 个域 pretty-print 编码在导入大备份后可达秒级，不该卡主线程。
+    struct DataOverviewInput: Sendable {
+        var categories: [TimeCategory]
+        var timeBlocks: [TimeBlock]
+        var sleepSessions: [SleepSession]
+        var workouts: [Workout]
+        var dietEntries: [DietEntry]
+        var expenses: [Expense]
+        var customFoods: [CustomFood]
+        var customExercises: [Exercise]
+    }
+
+    /// 取当前内存快照的概览输入（计数即时可得，编码另走 `computeOverview`）。
+    func dataOverviewInput() -> DataOverviewInput {
+        DataOverviewInput(categories: categories,
+                          timeBlocks: timeBlocks,
+                          sleepSessions: sleepSessions,
+                          workouts: workouts,
+                          dietEntries: dietEntries,
+                          expenses: expenses,
+                          customFoods: customFoods,
+                          customExercises: customExercises)
+    }
+
+    /// 后台编码体积估算（按 DataStore 同款编码选项序列化；
+    /// nonisolated——输入快照自包含，不触主线程状态）。
+    nonisolated static func computeOverview(_ input: DataOverviewInput) -> DataOverview {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -153,17 +179,23 @@ extension AppModel {
             (try? encoder.encode(value))?.count ?? 0
         }
         return DataOverview(
-            categories: categories.count,
-            timeBlocks: timeBlocks.count,
-            sleepSessions: sleepSessions.count,
-            workouts: workouts.count,
-            dietEntries: dietEntries.count,
-            expenses: expenses.count,
-            customFoods: customFoods.count,
-            customExercises: customExercises.count,
-            totalBytes: bytes(categories) + bytes(timeBlocks) + bytes(sleepSessions)
-                + bytes(workouts) + bytes(dietEntries) + bytes(expenses)
-                + bytes(customFoods) + bytes(customExercises))
+            categories: input.categories.count,
+            timeBlocks: input.timeBlocks.count,
+            sleepSessions: input.sleepSessions.count,
+            workouts: input.workouts.count,
+            dietEntries: input.dietEntries.count,
+            expenses: input.expenses.count,
+            customFoods: input.customFoods.count,
+            customExercises: input.customExercises.count,
+            totalBytes: bytes(input.categories) + bytes(input.timeBlocks)
+                + bytes(input.sleepSessions) + bytes(input.workouts)
+                + bytes(input.dietEntries) + bytes(input.expenses)
+                + bytes(input.customFoods) + bytes(input.customExercises))
+    }
+
+    /// 同步便捷入口（小数据量 / 测试用）；页面路径走 refresh 的后台版。
+    func dataOverview() -> DataOverview {
+        Self.computeOverview(dataOverviewInput())
     }
 
     // MARK: - 导入预检（三步容错净化的干跑；落盘走外壳 importBackup）
