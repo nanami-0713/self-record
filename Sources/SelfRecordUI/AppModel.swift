@@ -46,19 +46,33 @@ public final class AppModel: ObservableObject {
 
     // MARK: - 启动全量载入（§5：启动全量载入内存值类型快照）
 
+    /// 并发读盘（actor 串行执行读，但十次 actor hop 并起来），赋值集中到
+    /// 同一函数尾段——同一 runloop tick 内的多次 objectWillChange 会被
+    /// SwiftUI 合并为一轮刷新（原先逐条 await 赋值，首帧后最多重渲染 11 轮）。
     public func loadAll() async {
-        settings = await store.loadSettings()
-        let loadedCategories = await store.loadCategories()
+        async let aSettings = store.loadSettings()
+        async let aCategories = store.loadCategories()
+        async let aTimeBlocks = store.loadTimeBlocks()
+        async let aSleepSessions = store.loadSleepSessions()
+        async let aWorkouts = store.loadWorkouts()
+        async let aCustomExercises = store.loadCustomExercises()
+        async let aDietEntries = store.loadDietEntries()
+        async let aCustomFoods = store.loadCustomFoods()
+        async let aExpenses = store.loadExpenses()
+        async let aActive = store.loadActive()
+
+        settings = await aSettings
+        let loadedCategories = await aCategories
         // 首启/空分类文档 → 播种默认 9 分类（§4.1）；含 fallback 修正已在净化层完成
         categories = loadedCategories.isEmpty ? TimeCategory.defaults : loadedCategories
-        timeBlocks = await store.loadTimeBlocks()
-        sleepSessions = await store.loadSleepSessions()
-        workouts = await store.loadWorkouts()
-        customExercises = await store.loadCustomExercises()
-        dietEntries = await store.loadDietEntries()
-        customFoods = await store.loadCustomFoods()
-        expenses = await store.loadExpenses()
-        let active = await store.loadActive()
+        timeBlocks = await aTimeBlocks
+        sleepSessions = await aSleepSessions
+        workouts = await aWorkouts
+        customExercises = await aCustomExercises
+        dietEntries = await aDietEntries
+        customFoods = await aCustomFoods
+        expenses = await aExpenses
+        let active = await aActive
         activeTimer = active?.timer
         activeWorkout = active?.workout
     }

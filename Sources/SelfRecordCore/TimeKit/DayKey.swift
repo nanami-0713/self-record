@@ -36,17 +36,24 @@ public struct DayKey: RawRepresentable, Hashable, Codable, Sendable {
         try container.encode(rawValue)
     }
 
+    /// 校验用固定历法（UTC 公历）：静态缓存复用——`Calendar`/`TimeZone` 不可变
+    /// 实例线程安全，且本函数在净化循环与预算计划校验的热路径上被逐条调用，
+    /// 每次新建 Calendar + `TimeZone(identifier:)` 字符串查找纯属浪费。
+    private static let utcGregorian: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
     /// `yyyy-MM-dd` 且年月日真实存在（公历校验，回读比对防 02-30 溢出归一化）。
     public static func isValid(_ string: String) -> Bool {
         guard let parts = parse(string) else { return false }
-        var utcGregorian = Calendar(identifier: .gregorian)
-        utcGregorian.timeZone = TimeZone(identifier: "UTC")!
         var components = DateComponents()
         components.year = parts.year
         components.month = parts.month
         components.day = parts.day
-        guard let date = utcGregorian.date(from: components) else { return false }
-        let back = utcGregorian.dateComponents([.year, .month, .day], from: date)
+        guard let date = Self.utcGregorian.date(from: components) else { return false }
+        let back = Self.utcGregorian.dateComponents([.year, .month, .day], from: date)
         return back.year == parts.year && back.month == parts.month && back.day == parts.day
     }
 

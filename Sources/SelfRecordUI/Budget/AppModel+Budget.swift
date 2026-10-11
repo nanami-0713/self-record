@@ -177,12 +177,11 @@ extension AppModel {
         let spanSummary = BudgetEngine.summarize(inSpan, calendar: calendar)
         let outSummary = BudgetEngine.outOfPlan(inSpan)
 
+        // 周/月双状态走预合并入口（同帧只 merge 一次；冻结签名版内部各自再 merge）
         let weekStatus = BudgetEngine.status(budgetYuan: settings.weeklyBudgetYuan, span: weekSpan,
-                                             expenses: expenses, dietEntries: dietEntries,
-                                             calendar: calendar, now: now)
+                                             merged: all, calendar: calendar, now: now)
         let monthStatus = BudgetEngine.status(budgetYuan: settings.monthlyBudgetYuan, span: monthSpan,
-                                              expenses: expenses, dietEntries: dietEntries,
-                                              calendar: calendar, now: now)
+                                              merged: all, calendar: calendar, now: now)
         let selectedStatus = scope == .week ? weekStatus : monthStatus
         let otherStatus = scope == .week ? monthStatus : weekStatus
 

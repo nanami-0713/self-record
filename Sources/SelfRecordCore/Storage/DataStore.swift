@@ -42,10 +42,15 @@ public actor DataStore {
     /// 防抖合并区：最近一次编码结果 per 域（150ms 内的后续 save 只更新这里）。
     private var pendingWrites: [Domain: Data] = [:]
     private var debounceTasks: [Domain: Task<Void, Never>] = [:]
-    private static let debounceNanoseconds: UInt64 = 150_000_000
+    /// 防抖间隔（默认 150ms；测试可注入超长间隔，把 flush 时机交给显式调用——
+    /// 避免测试对「操作在 150ms 内完成」的隐含时序假设）。
+    private let debounceNanoseconds: UInt64
+    public static let defaultDebounceNanoseconds: UInt64 = 150_000_000
 
-    public init(directory: URL) throws {
+    public init(directory: URL,
+                debounceNanoseconds: UInt64 = DataStore.defaultDebounceNanoseconds) throws {
         self.directory = directory
+        self.debounceNanoseconds = debounceNanoseconds
         try FileManager.default.createDirectory(at: directory,
                                                 withIntermediateDirectories: true)
     }
@@ -85,7 +90,8 @@ public actor DataStore {
     private func scheduleFlush(_ domain: Domain) {
         debounceTasks[domain]?.cancel()
         debounceTasks[domain] = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: DataStore.debounceNanoseconds)
+            try? await Task.sleep(nanoseconds: self?.debounceNanoseconds
+                                      ?? DataStore.defaultDebounceNanoseconds)
             guard let self, !Task.isCancelled else { return }
             await self.flushNow()
         }
@@ -96,6 +102,15 @@ public actor DataStore {
         for (domain, data) in pendingWrites {
             try? atomicWrite(data, to: fileURL(domain))
         }
+        pendingWrites.removeAll()
+        for task in debounceTasks.values { task.cancel() }
+        debounceTasks.removeAll()
+    }
+
+    /// 清空防抖账（取消全部定时器并丢弃 pending）：导入覆盖各域文件前调用，
+    /// 否则 150ms 窗口内已入队的旧快照会在导入后由 `flushNow` 写回，
+    /// 覆盖刚导入的数据（内存/磁盘分叉，下次启动回退导入前状态）。
+    private func clearPendingWrites() {
         pendingWrites.removeAll()
         for task in debounceTasks.values { task.cancel() }
         debounceTasks.removeAll()
@@ -196,8 +211,10 @@ public actor DataStore {
     // MARK: 备份（§5 导出/导入）
 
     /// 合并各域为单个 `BackupDocument` JSON（文件名带日期由 UI 层处理）。
-    /// 从盘读当前态组装（DataStore 不持内存缓存——内存快照在 AppModel）。
+    /// 从盘读当前态组装（DataStore 不持内存缓存——内存快照在 AppModel）；
+    /// 先 `flushNow` 落盘防抖窗口内的最新变更，避免导出缺最后一笔。
     public func exportBackup(now: Date = Date()) throws -> Data {
+        flushNow()
         let document = BackupDocument(
             version: BackupDocument.currentVersion,
             exportedAt: now,
@@ -215,9 +232,11 @@ public actor DataStore {
 
     /// 导入：`BackupSanitizer` 元素级容错净化（§4 三步管线）→ 整体替换各域文件。
     /// 覆盖确认（confirmationDialog 双确认）在 UI 层（§5），本方法只做净化与落盘。
+    /// 落盘前先清防抖账：已入队的导入前旧快照不得覆盖刚写入的导入数据。
     @discardableResult
     public func importBackup(from data: Data) throws -> BackupDocument {
         let document = try BackupSanitizer.sanitizeDocument(from: data)
+        clearPendingWrites()
         try importWrite(document.settings, to: .settings)
         try importWrite(document.categories, to: .categories)
         try importWrite(document.timeBlocks, to: .time)

@@ -188,14 +188,23 @@ public enum BudgetEngine {
     /// 周期额度只算计划内条目（双口径见 BudgetStatus 注释）。
     public static func status(budgetYuan: Double?, span: DateSpan, expenses: [Expense], dietEntries: [DietEntry],
                               calendar: DayCalendar, now: Date) -> BudgetStatus? {
+        status(budgetYuan: budgetYuan, span: span,
+               merged: mergedExpenses(expenses, dietEntries: dietEntries),
+               calendar: calendar, now: now)
+    }
+
+    /// 预合并入口（性能通道）：与冻结签名版语义完全一致，接受调用方一次性
+    /// 合并好的开销流——周/月双状态共用一次 `mergedExpenses`（全量排序），
+    /// 避免同帧重复合并三次（budget 页取数 / report 均可复用）。
+    public static func status(budgetYuan: Double?, span: DateSpan, merged: [MergedExpense],
+                              calendar: DayCalendar, now: Date) -> BudgetStatus? {
         guard let budget = budgetYuan, budget > 0, span.isValid,
               let rangeStart = calendar.date(of: span.startDay),
               let lastDayStart = calendar.date(of: span.endDay),
               let rangeEnd = calendar.calendar.date(byAdding: .day, value: 1, to: lastDayStart)
         else { return nil }
 
-        let inWindow = inRange(mergedExpenses(expenses, dietEntries: dietEntries),
-                               in: span, calendar: calendar)
+        let inWindow = inRange(merged, in: span, calendar: calendar)
         let summary = summarize(inWindow, calendar: calendar)
         let outOfPlanPart = outOfPlan(inWindow)
         let spent = round2(inPlan(inWindow).reduce(0) { $0 + $1.amountYuan })

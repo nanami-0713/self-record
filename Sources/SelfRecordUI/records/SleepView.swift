@@ -136,7 +136,10 @@ struct SleepView: View {
     }
 
     var body: some View {
-        List {
+        // 近 7 天区间统计单次计算，趋势卡与摘要卡共用（A3 口径唯一来源；
+        // 原先 trendCard/durationRows/scoreRows/summaryGrid 各算一遍 = 4 次/body）
+        let summary = weekSummary
+        return List {
             Section {
                 bedCard
                     .srRecordsRow()
@@ -151,11 +154,11 @@ struct SleepView: View {
                 .srRecordsRow()
             }
             Section {
-                trendCard
+                trendCard(summary)
                     .srRecordsRow()
             }
             Section {
-                summaryGrid
+                summaryGrid(summary)
                     .srRecordsRow()
             }
             Section {
@@ -215,21 +218,23 @@ struct SleepView: View {
 
     // MARK: - 两击上床/起床卡
 
+    /// 计时文本之外全是静态结构：TimelineView 只收敛包「入睡中」的时长文本
+    /// （原先包整卡——无进行中计时也每 30s 重建全卡，对齐 TodayActiveStrip 的做法）。
     private var bedCard: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
-            bedCardContent(now: context.date)
-        }
+        bedCardContent
     }
 
     @ViewBuilder
-    private func bedCardContent(now: Date) -> some View {
+    private var bedCardContent: some View {
         SRCard(elevation: .raised) {
             VStack(alignment: .leading, spacing: SRSpacing.md) {
                 if let timer = model.activeTimer, timer.kind == .sleep {
                     SRBadge("入睡中")
-                    Text(Formatting.duration(minutes: now.timeIntervalSince(timer.startedAt) / 60))
-                        .srFont(.xxl, .semibold)
-                        .monospacedDigit()
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text(Formatting.duration(minutes: context.date.timeIntervalSince(timer.startedAt) / 60))
+                            .srFont(.xxl, .semibold)
+                            .monospacedDigit()
+                    }
                     Text("自 \(RecordsFmt.hm(timer.startedAt, calendar: model.recordsCalendar)) 上床")
                         .srFont(.sm)
                         .foregroundStyle(Color.srForegroundMuted)
@@ -267,8 +272,8 @@ struct SleepView: View {
                                   calendar: model.recordsCalendar)
     }
 
-    private var durationRows: [SleepTrendRow] {
-        weekSummary.series.compactMap { night in
+    private func durationRows(_ summary: SleepPeriodSummary) -> [SleepTrendRow] {
+        summary.series.compactMap { night in
             guard let minutes = night.durationMinutes else { return nil }
             return SleepTrendRow(id: "\(night.day.rawValue)-min",
                                  label: RecordsFmt.dayLabel(night.day),
@@ -276,8 +281,8 @@ struct SleepView: View {
         }
     }
 
-    private var scoreRows: [SleepTrendRow] {
-        weekSummary.series.compactMap { night in
+    private func scoreRows(_ summary: SleepPeriodSummary) -> [SleepTrendRow] {
+        summary.series.compactMap { night in
             guard let score = night.score else { return nil }
             return SleepTrendRow(id: "\(night.day.rawValue)-score",
                                  label: RecordsFmt.dayLabel(night.day),
@@ -285,8 +290,9 @@ struct SleepView: View {
         }
     }
 
-    private var trendCard: some View {
-        let summary = weekSummary
+    private func trendCard(_ summary: SleepPeriodSummary) -> some View {
+        let durationRows = durationRows(summary)
+        let scoreRows = scoreRows(summary)
         return SRCard {
             VStack(alignment: .leading, spacing: SRSpacing.md) {
                 HStack {
@@ -341,8 +347,7 @@ struct SleepView: View {
 
     // MARK: - 睡眠债与规律性摘要
 
-    private var summaryGrid: some View {
-        let summary = weekSummary
+    private func summaryGrid(_ summary: SleepPeriodSummary) -> some View {
         let columns = [GridItem(.flexible(), spacing: SRSpacing.md),
                        GridItem(.flexible(), spacing: SRSpacing.md)]
         return VStack(spacing: SRSpacing.md) {

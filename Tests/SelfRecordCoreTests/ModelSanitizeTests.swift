@@ -164,6 +164,54 @@ private let uuidC = "AABBCCDD-0011-4223-8445-566778899AAB"
     e.amountYuan = 0
 }
 
+@Test func workoutSanitizeDropsInvalidAndConvergesValues() {
+    // 结构性非法（end≤start）剔除；负重量/次数收敛非负；feeling 越界归 nil
+    let t = Date(timeIntervalSince1970: 1_760_000_000)
+    let badSet = WorkoutSet(weightKg: -20, reps: -3, timestamp: t)
+    let good = Workout(startedAt: t, endedAt: t.addingTimeInterval(3600),
+                       entries: [WorkoutExerciseEntry(exerciseID: "barbell-squat", sets: [badSet])],
+                       feeling: 4)
+    let invalid = Workout(startedAt: t, endedAt: t, entries: [], feeling: 2)   // end == start
+    let badFeeling = Workout(startedAt: t, endedAt: t.addingTimeInterval(3600),
+                             entries: [], feeling: 9)
+    let result = BackupSanitizer.sanitize([good, invalid, badFeeling])
+    #expect(result.count == 2)
+    #expect(result.first?.entries.first?.sets.first?.weightKg == 0)
+    #expect(result.first?.entries.first?.sets.first?.reps == 0)
+    #expect(result.first?.feeling == 4)
+    #expect(result.last?.feeling == nil)
+}
+
+@Test func exerciseSanitizeDropsEmptyIDOrName() {
+    let good = Exercise(id: "custom-1", name: "保加利亚分腿蹲", isCustom: true)
+    let noName = Exercise(id: "custom-2", name: "", isCustom: true)
+    let noID = Exercise(id: "", name: "无 id 动作", isCustom: true)
+    let longName = Exercise(id: "custom-3",
+                            name: String(repeating: "名", count: 3000), isCustom: true)
+    let result = BackupSanitizer.sanitize([good, noName, noID, longName])
+    #expect(result.count == 2)
+    #expect(result.map(\.id) == ["custom-1", "custom-3"])
+    #expect(result.last?.name.count == SanitizeLimits.stringMaxLength)
+}
+
+@Test func dietEntrySanitizeConvergesNegativesAndNilifiesCost() {
+    // 负宏量收敛 0；costYuan 越界（负值）归 nil；items 负克数收敛 0
+    let t = Date(timeIntervalSince1970: 1_760_000_000)
+    let entry = DietEntry(date: t, meal: .lunch, rawText: "测试",
+                          items: [FoodMatch(name: "鸡胸肉", grams: -50,
+                                            per100g: Per100g(kcal: -133, proteinG: 24, carbsG: 1, fatG: 3))],
+                          totals: MacroTotals(kcal: -100, proteinG: -5, carbsG: 2, fatG: 3),
+                          costYuan: -8)
+    let result = BackupSanitizer.sanitize([entry])
+    #expect(result.count == 1)
+    #expect(result.first?.totals.kcal == 0)
+    #expect(result.first?.totals.proteinG == 0)
+    #expect(result.first?.costYuan == nil)
+    #expect(result.first?.items.first?.grams == 0)
+    #expect(result.first?.items.first?.per100g.kcal == 0)
+    #expect(result.first?.items.first?.per100g.proteinG == 24)
+}
+
 // MARK: 文档级净化（导入路径）
 
 @Test func sanitizeDocumentKeepsCustomFoods() throws {
@@ -193,11 +241,49 @@ private let uuidC = "AABBCCDD-0011-4223-8445-566778899AAB"
     #expect(throws: SanitizeError.notObject) {
         _ = try BackupSanitizer.sanitizeDocument(from: jsonData("[1,2,3]"))
     }
-    // 深度 > 6
-    let deep = jsonData("{\"a\":" + String(repeating: "[", count: 8) + String(repeating: "]", count: 8) + "}")
+    // 深度 > maxDepth（10）：1 层对象 + 12 层数组 = 13，须仍被拒
+    //（上限 2026-10-06→10-12 从 6 提到 10：带组的训练合法形状即 8 层，见
+    // sanitizeDocumentAcceptsNestedRealShapes；此处深度用 12 保证余量不被误伤）
+    let deep = jsonData("{\"a\":" + String(repeating: "[", count: 12) + String(repeating: "]", count: 12) + "}")
     #expect(throws: SanitizeError.tooDeep) {
         _ = try BackupSanitizer.sanitizeDocument(from: deep)
     }
+}
+
+@Test func sanitizeDocumentAcceptsNestedRealShapes() throws {
+    // maxDepth 回归锚点：真实文档最深合法形状——带组的训练
+    // root→workouts→Workout→entries→entry→sets→set→标量 = 8 层；
+    // 带命中的记餐 root→dietEntries→DietEntry→items→FoodMatch→per100g→标量 = 7 层。
+    // 上限曾为 6：导出的备份只要含一条带组训练/带命中记餐，导入即 tooDeep 整体失败
+    //（2026-10-12 修复，配套 DataStore 导出→导入往返见下）。
+    let t = Date(timeIntervalSince1970: 1_760_000_000)
+    let set = WorkoutSet(weightKg: 100, reps: 5, timestamp: t)
+    let entry = WorkoutExerciseEntry(exerciseID: "barbell-squat", sets: [set, set])
+    let workout = Workout(startedAt: t, endedAt: t.addingTimeInterval(3600),
+                          entries: [entry], feeling: 4)
+    let diet = DietEntry(date: t, meal: .lunch, rawText: "鸡胸肉 200g",
+                         items: [FoodMatch(name: "鸡胸肉", grams: 200,
+                                           per100g: Per100g(kcal: 133, proteinG: 24, carbsG: 1, fatG: 3))],
+                         totals: MacroTotals(kcal: 266, proteinG: 48, carbsG: 2, fatG: 6),
+                         costYuan: 12)
+    let document = BackupDocument(exportedAt: t,
+                                  settings: AppSettings(),
+                                  categories: TimeCategory.defaults,
+                                  timeBlocks: [], sleepSessions: [],
+                                  workouts: [workout],
+                                  customExercises: [], dietEntries: [diet],
+                                  expenses: [], customFoods: [])
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let data = try encoder.encode(document)
+
+    let sanitized = try BackupSanitizer.sanitizeDocument(from: data)
+    #expect(sanitized.workouts.count == 1)
+    #expect(sanitized.workouts.first?.entries.first?.sets.count == 2)
+    #expect(sanitized.workouts.first?.entries.first?.sets.first?.weightKg == 100)
+    #expect(sanitized.dietEntries.count == 1)
+    #expect(sanitized.dietEntries.first?.items.first?.per100g.proteinG == 24)
+    #expect(sanitized.dietEntries.first?.costYuan == 12)
 }
 
 // MARK: DataStore 端到端（临时目录注入，§5/§10）
@@ -271,4 +357,167 @@ private let uuidC = "AABBCCDD-0011-4223-8445-566778899AAB"
     #expect(expenses == [expense])
     let sessions = await store.loadSleepSessions()
     #expect(sessions.count == 1)
+}
+
+// MARK: DataStore 导出→导入往返 / 防抖 / 清空 / plans（2026-10-12 补）
+
+/// maxDepth 回归（端到端）：自己导出的备份（含嵌套真实数据）必须能导入自己。
+/// 修复前：带组的训练深度 8 > 旧上限 6 → tooDeep 整体失败（导出能用导入全挂）。
+@Test func dataStoreExportImportRoundTripWithNestedData() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sr-tests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = try DataStore(directory: dir)
+
+    let t = Date(timeIntervalSince1970: 1_760_000_000)
+    let set = WorkoutSet(weightKg: 102.5, reps: 5, timestamp: t)
+    let workout = Workout(startedAt: t, endedAt: t.addingTimeInterval(5400),
+                          entries: [WorkoutExerciseEntry(exerciseID: "barbell-squat", sets: [set, set])],
+                          feeling: 4)
+    let diet = DietEntry(date: t, meal: .postworkout, rawText: "鸡胸肉 200g",
+                         items: [FoodMatch(name: "鸡胸肉", grams: 200,
+                                           per100g: Per100g(kcal: 133, proteinG: 24, carbsG: 1, fatG: 3))],
+                         totals: MacroTotals(kcal: 266, proteinG: 48),
+                         costYuan: 15)
+    await store.save(workouts: [workout])
+    await store.save(dietEntries: [diet])
+
+    let exported = try await store.exportBackup()
+
+    // 同一 store 覆盖导入（换机语义 = 新 store 导入同款数据，净化管线相同）
+    _ = try await store.importBackup(from: exported)
+    let workouts = await store.loadWorkouts()
+    #expect(workouts.count == 1)
+    #expect(workouts.first?.entries.first?.sets.count == 2)
+    #expect(workouts.first?.entries.first?.sets.first?.weightKg == 102.5)
+    #expect(workouts.first?.feeling == 4)
+    let entries = await store.loadDietEntries()
+    #expect(entries.count == 1)
+    #expect(entries.first?.items.first?.per100g.proteinG == 24)
+    #expect(entries.first?.costYuan == 15)
+}
+
+/// 防抖合并语义（§5「commit 立即写 + 150ms 内合并为最后一次写」，design.md §10
+/// 承诺要点）：首笔立即落盘 → 后续变更只进 pending → flushNow 后盘上是最后一次。
+/// 注入 10s 超长防抖：窗口内定时器绝不触发，flush 时机完全由测试控制。
+@Test func dataStoreDebounceMergesIntoFinalWrite() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sr-tests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = try DataStore(directory: dir, debounceNanoseconds: 10_000_000_000)
+
+    let t = Date(timeIntervalSince1970: 1_760_000_000)
+    let v1 = SleepSession(start: t, end: t.addingTimeInterval(7 * 3600), feel: 3)
+    let v2 = SleepSession(start: t, end: t.addingTimeInterval(8 * 3600), feel: 4)
+
+    await store.save(sleepSessions: [v1])
+    // 首笔立即写：盘上已是 v1（不等防抖）
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let disk1 = try Data(contentsOf: dir.appendingPathComponent("sleep.json"))
+    #expect((try decoder.decode([SleepSession].self, from: disk1)) == [v1])
+
+    await store.save(sleepSessions: [v2])
+    // 防抖窗口内：盘上仍是 v1（v2 只在 pending）
+    let disk2 = try Data(contentsOf: dir.appendingPathComponent("sleep.json"))
+    #expect((try decoder.decode([SleepSession].self, from: disk2)) == [v1])
+
+    await store.flushNow()
+    // 合并落盘：盘上是最后一次（v2）
+    let disk3 = try Data(contentsOf: dir.appendingPathComponent("sleep.json"))
+    #expect((try decoder.decode([SleepSession].self, from: disk3)) == [v2])
+    let loaded = await store.loadSleepSessions()
+    #expect(loaded == [v2])
+}
+
+/// 导出前 flush：防抖窗口内未落盘的最后一笔必须进导出文件。
+@Test func dataStoreExportIncludesPendingWrites() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sr-tests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = try DataStore(directory: dir, debounceNanoseconds: 10_000_000_000)
+
+    let t = Date(timeIntervalSince1970: 1_760_000_000)
+    let early = SleepSession(start: t, end: t.addingTimeInterval(6 * 3600), feel: 3)
+    let latest = SleepSession(start: t, end: t.addingTimeInterval(8 * 3600), feel: 4)
+    await store.save(sleepSessions: [early])
+    await store.save(sleepSessions: [latest])     // 仅进 pending（150ms 窗口内）
+
+    let exported = try await store.exportBackup() // 修复点：导出前 flushNow
+    let document = try BackupSanitizer.sanitizeDocument(from: exported)
+    #expect(document.sleepSessions == [latest])
+}
+
+/// 导入清防抖账：已入队的导入前旧快照不得在导入后由 flushNow 写回覆盖导入数据。
+@Test func dataStoreImportInvalidatesPendingWrites() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sr-tests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = try DataStore(directory: dir, debounceNanoseconds: 10_000_000_000)
+
+    // t=0 编辑（立即写 + pending 入队 + 150ms 定时器）
+    let t = Date(timeIntervalSince1970: 1_760_000_000)
+    let staleBlock = TimeBlock(start: t, end: t.addingTimeInterval(1800), categoryID: "strength")
+    await store.save(timeBlocks: [staleBlock])
+
+    // t<150ms 导入：导入数据落盘，随后定时器触发的 flushNow 不得写回旧快照
+    let importedBlock = TimeBlock(start: t.addingTimeInterval(7200),
+                                  end: t.addingTimeInterval(9000), categoryID: "cardio")
+    let document = BackupDocument(exportedAt: t, settings: AppSettings(),
+                                  categories: TimeCategory.defaults,
+                                  timeBlocks: [importedBlock],
+                                  sleepSessions: [], workouts: [], customExercises: [],
+                                  dietEntries: [], expenses: [], customFoods: [])
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    _ = try await store.importBackup(from: encoder.encode(document))
+    await store.flushNow()                        // 显式触发原会覆盖导入的路径
+
+    let blocks = await store.loadTimeBlocks()
+    #expect(blocks == [importedBlock])
+}
+
+/// eraseAll（§6 DataManagementView「清空」落点）：各域文件删除，读回空/默认。
+@Test func dataStoreEraseAllClearsDomains() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sr-tests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = try DataStore(directory: dir)
+
+    let t = Date(timeIntervalSince1970: 1_760_000_000)
+    var settings = AppSettings()
+    settings.weeklyBudgetYuan = 500
+    await store.save(settings: settings)
+    await store.save(sleepSessions: [SleepSession(start: t, end: t.addingTimeInterval(8 * 3600))])
+    await store.save(workouts: [Workout(startedAt: t, endedAt: t.addingTimeInterval(3600))])
+    await store.save(expenses: [Expense(date: t, amountYuan: 23, category: .takeout)])
+
+    try await store.eraseAll()
+
+    #expect(await store.loadSettings() == AppSettings())          // 默认值
+    #expect(await store.loadSleepSessions().isEmpty)
+    #expect(await store.loadWorkouts().isEmpty)
+    #expect(await store.loadExpenses().isEmpty)
+}
+
+/// plans 域持久化（.plans 不在 BackupDocument 内——冻结契约，见 DataStore 注释；
+/// 此处只锚定 save/load 往返与坏计划剔除语义）。
+@Test func dataStoreBudgetPlansRoundTrip() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sr-tests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = try DataStore(directory: dir)
+
+    let cal = DayCalendar()
+    let today = cal.dayKey(for: Date(timeIntervalSince1970: 1_760_000_000))
+    let valid = CustomBudgetPlan(name: "双十一冲刺", amountYuan: 800,
+                                 startDay: today,
+                                 endDay: cal.addingDays(13, to: today) ?? today)
+    let invalid = CustomBudgetPlan(name: "坏计划", amountYuan: -1,
+                                   startDay: today, endDay: today)  // 金额越界 → isValid false
+    await store.save(budgetPlans: [valid, invalid])
+    await store.flushNow()
+
+    let loaded = await store.loadBudgetPlans()
+    #expect(loaded == [valid])                    // 坏条剔除（sanitized），好条存活
 }

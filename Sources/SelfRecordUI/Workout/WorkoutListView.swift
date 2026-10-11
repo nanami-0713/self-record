@@ -124,20 +124,19 @@ private struct WorkoutHistoryRow: View {
     let workout: Workout
     let customExercises: [Exercise]
 
-    private var primaryText: String {
+    /// 主练部位文本：优先分析快照；无快照时用调用方单次预算的现算结果。
+    private func primaryText(_ fallbackStats: SessionStats?) -> String {
         let keys: [MuscleGroup]
         if let analysis = workout.analysis {
             keys = analysis.primaryMuscles
         } else {
-            keys = WorkoutEngine.sessionStats(workout, customExercises: customExercises)
-                .muscles.prefix(3).map(\.key)
+            keys = fallbackStats?.muscles.prefix(3).map(\.key) ?? []
         }
         return keys.map { ExerciseLibrary.muscleLabel($0) }.joined(separator: "、")
     }
 
-    private var volumeValue: Double {
-        workout.analysis?.totals.volumeKg
-            ?? WorkoutEngine.sessionStats(workout, customExercises: customExercises).tonnage
+    private func volumeValue(_ fallbackStats: SessionStats?) -> Double {
+        workout.analysis?.totals.volumeKg ?? fallbackStats?.tonnage ?? 0
     }
 
     private var prCount: Int { workout.analysis?.prs.count ?? 0 }
@@ -147,7 +146,12 @@ private struct WorkoutHistoryRow: View {
     }
 
     var body: some View {
-        SRCard(padding: SRSpacing.md) {
+        // 无分析快照（导入的旧数据）时才现算 sessionStats，单次求值供
+        // 主练/容量两处（原先两个计算属性各算一遍，滚动重渲染时每行 ×2）
+        let fallbackStats: SessionStats? = workout.analysis == nil
+            ? WorkoutEngine.sessionStats(workout, customExercises: customExercises)
+            : nil
+        return SRCard(padding: SRSpacing.md) {
             HStack(alignment: .center, spacing: SRSpacing.md) {
                 VStack(alignment: .leading, spacing: SRSpacing.xs) {
                     Text(workout.startedAt.formatted(.dateTime.month().day()))
@@ -162,7 +166,7 @@ private struct WorkoutHistoryRow: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: SRSpacing.xs) {
                     HStack(spacing: SRSpacing.xs) {
-                        Text(WorkoutDisplay.kg(volumeValue))
+                        Text(WorkoutDisplay.kg(volumeValue(fallbackStats)))
                             .font(.srMono(.md, .medium))
                             .monospacedDigit()
                             .foregroundStyle(Color.srForeground)
@@ -179,7 +183,7 @@ private struct WorkoutHistoryRow: View {
                                     tone: WorkoutDisplay.domsTone(doms))
                         }
                     }
-                    Text("主练 \(primaryText)")
+                    Text("主练 \(primaryText(fallbackStats))")
                         .srFont(.sm)
                         .foregroundStyle(Color.srForegroundMuted)
                 }

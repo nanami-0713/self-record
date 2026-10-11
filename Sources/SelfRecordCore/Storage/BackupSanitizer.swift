@@ -22,7 +22,13 @@ public enum SanitizeLimits {
     public static let stringMaxLength = 2000
     public static let labelMaxLength = 64
     public static let collectionMax = 100_000
-    public static let maxDepth = 6
+    /// JSON 嵌套深度上限（防病态嵌套炸弹）。上限须容纳文档**最深合法形状**：
+    /// 带组的训练 root→workouts→Workout→entries→entry→sets→set→标量 = 8 层
+    /// （带 analysis.prs 的更深一层、记餐 items→per100g 为 7 层），取 10 留余量。
+    /// ⚠ 2026-10-12 修复：曾沿 lifttime 扁平记录形状取 6，导致「导出能用、
+    /// 导入必挂 tooDeep」（任何含嵌套数据的真实备份均被拒）——配套回归测试
+    /// 见 ModelSanitizeTests「导出→导入往返（嵌套数据）」。
+    public static let maxDepth = 10
     public static let importMaxBytes = 50_000_000
 
     public static let bodyweightRange: ClosedRange<Double> = 0...2000
@@ -47,7 +53,7 @@ public enum SanitizeLimits {
 public enum SanitizeError: Error, Equatable, Sendable {
     case tooLarge          // > 50MB（§5 导入上限）
     case notJSON           // 格式预检失败
-    case tooDeep           // 解码深度 > 6
+    case tooDeep           // 解码深度 > maxDepth（10）
     case notObject         // 顶层不是 JSON 对象
 }
 

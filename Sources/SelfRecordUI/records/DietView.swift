@@ -64,9 +64,10 @@ struct DietManualRow: Identifiable {
 }
 
 /// DietView 页面态（SwiftUI 宏禁令 §8 约定 5：ObservableObject 路径）。
+/// 段选 range 已下沉为 DietSummarySection 的本地 @State——rawText 逐键变更
+/// 不再连带本对象发布（原先 page 的任一 @Published 变更都会让整页 body 重算）。
 final class DietRecordsModel: ObservableObject {
 
-    @Published var range: DietRangeTab = .day
     @Published var rawText = ""
     @Published var showsConfirm = false
     @Published var mealRaw = MealSlot.snack.rawValue
@@ -144,31 +145,12 @@ struct DietView: View {
                     .srRecordsRow()
             }
             Section {
-                summarySection
+                // 独立子视图（只观察 AppModel）：记餐输入逐键触发的是父 body 重算，
+                // 本子视图值不变时 SwiftUI 跳过其 body——日/阶段全量聚合不随输入重算
+                DietSummarySection(model: model)
                     .srRecordsRow()
             }
-            Section {
-                Text("今日记录").srFont(.lg, .semibold)
-                    .srRecordsRow()
-                ForEach(todayEntries) { entry in
-                    entryRow(entry)
-                        .srRecordsRow()
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                model.deleteDietEntry(id: entry.id)
-                            } label: {
-                                Label("删除", systemImage: "trash")
-                            }
-                        }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                model.deleteDietEntry(id: entry.id)
-                            } label: {
-                                Label("删除", systemImage: "trash")
-                            }
-                        }
-                }
-            }
+            DietTodaySection(model: model)
         }
         .listStyle(.plain)
         .listSectionSeparator(.hidden)
@@ -211,12 +193,24 @@ struct DietView: View {
         }
     }
 
-    // MARK: - 日/周/月总结
+    // MARK: - 今日记录列表（见 DietTodaySection）与日/周/月总结（见
+    // DietSummarySection）已拆为子视图——记餐输入逐键重算只落在输入卡本身。
+}
 
-    private var summarySection: some View {
+// MARK: - 日/周/月总结（独立子视图）
+
+/// 只观察 AppModel 的总结区：段选为本地 @State（原为 page.range @Published——
+/// 与 rawText 同对象，逐键输入会连带全量聚合重算）。子视图值（model 引用）
+/// 不变时 SwiftUI 跳过其 body，日/阶段聚合只在域数据真正变化时重算。
+private struct DietSummarySection: View {
+
+    @ObservedObject var model: AppModel
+    @State private var range: DietRangeTab = .day
+
+    var body: some View {
         VStack(spacing: SRSpacing.md) {
-            SRSegmented(options: DietRangeTab.allCases, selection: $page.range) { $0.label }
-            switch page.range {
+            SRSegmented(options: DietRangeTab.allCases, selection: $range) { $0.label }
+            switch range {
             case .day: daySummaryCard
             case .week: periodSummaryCard(days: 7)
             case .month: periodSummaryCard(days: 30)
@@ -317,7 +311,7 @@ struct DietView: View {
 
     private func adviceList(_ advice: [String]) -> some View {
         VStack(alignment: .leading, spacing: SRSpacing.xs) {
-            RecordsSectionLabel(page.range == .day ? "今日建议" : "阶段建议")
+            RecordsSectionLabel(range == .day ? "今日建议" : "阶段建议")
             ForEach(Array(advice.enumerated()), id: \.offset) { _, line in
                 HStack(alignment: .top, spacing: SRSpacing.sm) {
                     Image(systemName: "lightbulb")
@@ -331,8 +325,39 @@ struct DietView: View {
             }
         }
     }
+}
 
-    // MARK: - 今日记录列表
+// MARK: - 今日记录列表（独立子视图）
+
+/// 只观察 AppModel：与总结区同理，逐键输入重算不落这里。
+private struct DietTodaySection: View {
+
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Section {
+            Text("今日记录").srFont(.lg, .semibold)
+                .srRecordsRow()
+            ForEach(todayEntries) { entry in
+                entryRow(entry)
+                    .srRecordsRow()
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            model.deleteDietEntry(id: entry.id)
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            model.deleteDietEntry(id: entry.id)
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
+            }
+        }
+    }
 
     private var todayEntries: [DietEntry] {
         DietEngine.entriesOfDay(model.dietEntries,

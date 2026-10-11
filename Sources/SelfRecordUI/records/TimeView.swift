@@ -133,14 +133,14 @@ struct TimeView: View {
 
     // MARK: - 单槽计时器卡
 
+    /// 计时文本之外全是静态结构：TimelineView 只收敛包时长文本
+    /// （原先包整卡——无进行中计时也每 30s 重建全卡，对齐 TodayActiveStrip 的做法）。
     private var timerCard: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
-            timerCardContent(now: context.date)
-        }
+        timerCardContent
     }
 
     @ViewBuilder
-    private func timerCardContent(now: Date) -> some View {
+    private var timerCardContent: some View {
         SRCard(elevation: .raised) {
             if let timer = model.activeTimer {
                 VStack(alignment: .leading, spacing: SRSpacing.md) {
@@ -148,9 +148,11 @@ struct TimeView: View {
                         SRBadge(timer.kind == .sleep ? "睡眠计时中" : "日常计时中")
                         Spacer()
                     }
-                    Text(Formatting.duration(minutes: now.timeIntervalSince(timer.startedAt) / 60))
-                        .srFont(.xxl, .semibold)
-                        .monospacedDigit()
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text(Formatting.duration(minutes: context.date.timeIntervalSince(timer.startedAt) / 60))
+                            .srFont(.xxl, .semibold)
+                            .monospacedDigit()
+                    }
                     Text("自 \(RecordsFmt.hm(timer.startedAt, calendar: model.recordsCalendar)) 开始")
                         .srFont(.sm)
                         .foregroundStyle(Color.srForegroundMuted)
