@@ -10,8 +10,9 @@
 # design.md §8「App target 引用 app/ 与本地两个 package」的落点；本仓库
 # 是单 package 双 library 形态，非两个独立包目录）。
 #
-# ⚠ 本机无完整 Xcode、未安装 xcodegen（design.md §0-3 实测）：本文件的
-#   产出在本机零验证，属 §11 风险 3 声明面；配置保持最小常规形态。
+# ⚠ 2026-10-06 起本机已装完整 Xcode + xcodegen：xcodegen generate →
+#   xcodebuild 构建/测试、模拟器安装启动均已在验收中跑通（docs/delivery-report.md
+#   「验收补录」）；发布 ipa 打包流程见 README「下载与安装」。
 
 name: SelfRecord
 
@@ -41,8 +42,9 @@ targets:
       base:
         PRODUCT_NAME: SelfRecord
         INFOPLIST_KEY_CFBundleDisplayName: SelfRecord
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        # 与 release tag 对齐（v0.2.0；此前 1.0 与 tag v0.1.0 不同步）
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "2"
         # 与 Package.swift 的 swiftLanguageModes: [.v6] 保持一致（需 Xcode 16+）
         SWIFT_VERSION: "6.0"
         GENERATE_INFOPLIST_FILE: YES
